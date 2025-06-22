@@ -12,6 +12,8 @@ const http = require('http');
 const { Server } = require("socket.io");
 const fs = require('fs/promises');
 const QRCode = require('qrcode');
+const schedule = require('node-schedule');
+const { zonedTimeToUtc, format } = require('date-fns-tz');
 
 const app = express();
 const server = http.createServer(app);
@@ -31,6 +33,7 @@ let connectionStatus = {
     user: null,
     qr: null,
 };
+const activeScheduledJobs = new Map(); // Map<jobId, { number: string, message: string, scheduledTime: Date, timezone: string, jobInstance: Job }>
 let isConnecting = false;
 
 // Function to broadcast the current status to all clients
@@ -132,6 +135,7 @@ async function connectToWhatsApp() {
             console.log(`WhatsApp connection opened successfully. Connected as: ${name || 'No Name'} (${number}) [Device ID: ${id.split(':')[1]?.split('@')[0] || 'N/A'}]`);
             broadcastStatus();
             isConnecting = false;
+            broadcastScheduledJobs(); // Broadcast scheduled jobs on successful connection
         }
     });
 
@@ -139,29 +143,119 @@ async function connectToWhatsApp() {
 }
 
 // API endpoint to send a message
+// Function to broadcast the current list of scheduled jobs to all clients
+function broadcastScheduledJobs() {
+    const jobsData = Array.from(activeScheduledJobs.entries()).map(([id, jobInfo]) => ({
+        id: id,
+        number: jobInfo.number,
+        message: jobInfo.message,
+        scheduledTime: jobInfo.scheduledTime.toISOString(), // Send as ISO string
+        timezone: jobInfo.timezone,
+    }));
+    io.emit('scheduledJobsUpdate', jobsData);
+    console.log('Broadcasting scheduled jobs update:', jobsData.length, 'jobs');
+}
+
+// API endpoint to send a message or schedule it
 app.post('/send-message', async (req, res) => {
-    const { number, message } = req.body;
+    const { number, message, schedule: scheduleOptions } = req.body;
 
     if (!number || !message) {
         return res.status(400).json({ success: false, message: 'Number and message are required.' });
     }
 
-    if (!sock || !connectionStatus.connected) {
-        return res.status(500).json({ success: false, message: 'Client not connected. Cannot send message.' });
-    }
-
-    try {
+    // Reusable function to send a message
+    const sendMessage = async () => {
+        if (!sock || !connectionStatus.connected) {
+            throw new Error('Client not connected.');
+        }
         const jid = number.includes('@s.whatsapp.net') ? number : `${number}@s.whatsapp.net`;
         const [result] = await sock.onWhatsApp(jid);
         if (!result?.exists) {
-             return res.status(400).json({ success: false, message: `Number ${number} is not on WhatsApp.` });
+            throw new Error(`Number ${number} is not on WhatsApp.`);
         }
-
         await sock.sendMessage(jid, { text: message });
-        res.json({ success: true, message: 'Message sent successfully.' });
-    } catch (error) {
-        console.error('Error sending message:', error);
-        res.status(500).json({ success: false, message: 'Failed to send message.' });
+    };
+
+    if (scheduleOptions) {
+        const { date, time, timezone } = scheduleOptions;
+        const dateTimeString = `${date}T${time}:00`;
+        const jobId = `job-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`; // Unique ID for the job
+
+        try {
+            const scheduledDate = zonedTimeToUtc(dateTimeString, timezone);
+
+            if (scheduledDate < new Date()) {
+                return res.status(400).json({ success: false, message: 'Scheduled time is in the past.' });
+            }
+
+            // Schedule the job
+            const job = schedule.scheduleJob(jobId, scheduledDate, () => {
+                console.log(`Executing scheduled job for ${number}`);
+                sendMessage().catch(err => {
+                    console.error(`Failed to send scheduled message to ${number}:`, err.message);
+                }).finally(() => {
+                    // Remove job from active list after execution
+                    activeScheduledJobs.delete(jobId);
+                    broadcastScheduledJobs();
+                });
+            });
+
+            // Store job details
+            activeScheduledJobs.set(jobId, {
+                number,
+                message,
+                scheduledTime: scheduledDate,
+                timezone,
+                jobInstance: job, // Store the job instance for cancellation
+            });
+
+            // Format a user-friendly response
+            const formattedDate = format(scheduledDate, 'yyyy-MM-dd HH:mm:ss zzz', { timeZone: timezone });
+            const responseMessage = `Message scheduled for ${formattedDate}.`;
+            console.log(responseMessage);
+            broadcastScheduledJobs(); // Broadcast update after scheduling
+
+            res.json({ success: true, message: responseMessage });
+        } catch (error) {
+            console.error('Error scheduling message:', error);
+            return res.status(500).json({ success: false, message: 'Invalid date, time, or timezone for scheduling.' });
+        }
+    } else {
+        // Send immediately
+        try {
+            await sendMessage();
+            res.json({ success: true, message: 'Message sent successfully.' });
+        } catch (error) {
+            console.error('Error sending message:', error.message);
+            res.status(500).json({ success: false, message: error.message || 'Failed to send message.' });
+        }
+    }
+});
+
+// API endpoint to get all scheduled messages
+app.get('/scheduled-messages', (req, res) => {
+    const jobsData = Array.from(activeScheduledJobs.entries()).map(([id, jobInfo]) => ({
+        id: id,
+        number: jobInfo.number,
+        message: jobInfo.message,
+        scheduledTime: jobInfo.scheduledTime.toISOString(),
+        timezone: jobInfo.timezone,
+    }));
+    res.json({ success: true, scheduledJobs: jobsData });
+});
+
+// API endpoint to cancel a scheduled message
+app.post('/cancel-schedule', (req, res) => {
+    const { jobId } = req.body;
+    const jobInfo = activeScheduledJobs.get(jobId);
+
+    if (jobInfo && jobInfo.jobInstance.cancel()) {
+        activeScheduledJobs.delete(jobId);
+        broadcastScheduledJobs(); // Broadcast update after cancellation
+        res.json({ success: true, message: `Scheduled message ${jobId} cancelled.` });
+    } else {
+        res.status(404).json({ success: false, message: `Scheduled message ${jobId} not found or could not be cancelled.` });
     }
 });
 
@@ -189,6 +283,7 @@ io.on('connection', (socket) => {
     console.log('A user connected to the frontend.');
     broadcastStatus();
     socket.on('disconnect', () => {
+        // No need to broadcast status here, as the connection status is handled by Baileys events
         console.log('User disconnected from the frontend.');
     });
 });
