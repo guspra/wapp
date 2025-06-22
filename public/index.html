@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="/wapp/socket.io/socket.io.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WhatsApp Sender</title>
@@ -108,7 +108,9 @@
         const scheduleOptions = document.getElementById('schedule-options');
         const scheduledMessagesList = document.getElementById('scheduled-messages-list');
 
-        const socket = io();
+        const socket = io({
+            path: '/wapp/socket.io'
+        });
         let statusTimeout;
 
         function showStatusMessage(message, type, duration = 5000) {
@@ -175,7 +177,7 @@
         // Function to fetch and render scheduled messages
         async function fetchScheduledMessages() {
             try {
-                const response = await fetch('/scheduled-messages');
+                const response = await fetch('/wapp/scheduled-messages');
                 const result = await response.json();
                 if (result.success) {
                     renderScheduledMessages(result.scheduledJobs);
@@ -225,7 +227,7 @@
             connectionStatusDiv.className = 'connecting';
             mainContent.style.display = 'none';
             scheduledMessagesList.innerHTML = ''; // Clear scheduled messages on logout
-            await fetch('/logout', { method: 'POST' });
+            await fetch('/wapp/logout', { method: 'POST' });
             // Server events will take over from here to display a new QR code.
         });
 
@@ -255,7 +257,7 @@
             statusDiv.textContent = 'Sending...';
             statusDiv.className = '';
 
-            const response = await fetch('/send-message', {
+            const response = await fetch('/wapp/send-message', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
@@ -279,7 +281,7 @@
                 statusDiv.textContent = 'Cancelling...';
                 statusDiv.className = '';
 
-                const response = await fetch('/cancel-schedule', {
+                const response = await fetch('/wapp/cancel-schedule', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ jobId })

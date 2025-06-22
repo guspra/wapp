@@ -16,14 +16,18 @@ const schedule = require('node-schedule');
 const { zonedTimeToUtc, format } = require('date-fns-tz');
 
 const app = express();
+const router = express.Router();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  path: '/wapp/socket.io',
+});
 const port = process.env.PORT || 3000;
 
 // Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
+router.use(express.json());
+router.use(express.urlencoded({ extended: true }));
+// Serve static files from the root of the /wapp path
+router.use(express.static(path.join(__dirname, 'public')));
 
 // Centralized application state
 let sock;
@@ -157,7 +161,7 @@ function broadcastScheduledJobs() {
 }
 
 // API endpoint to send a message or schedule it
-app.post('/send-message', async (req, res) => {
+router.post('/send-message', async (req, res) => {
     const { number, message, schedule: scheduleOptions } = req.body;
 
     if (!number || !message) {
@@ -234,7 +238,7 @@ app.post('/send-message', async (req, res) => {
 });
 
 // API endpoint to get all scheduled messages
-app.get('/scheduled-messages', (req, res) => {
+router.get('/scheduled-messages', (req, res) => {
     const jobsData = Array.from(activeScheduledJobs.entries()).map(([id, jobInfo]) => ({
         id: id,
         number: jobInfo.number,
@@ -246,7 +250,7 @@ app.get('/scheduled-messages', (req, res) => {
 });
 
 // API endpoint to cancel a scheduled message
-app.post('/cancel-schedule', (req, res) => {
+router.post('/cancel-schedule', (req, res) => {
     const { jobId } = req.body;
     const jobInfo = activeScheduledJobs.get(jobId);
 
@@ -260,7 +264,7 @@ app.post('/cancel-schedule', (req, res) => {
 });
 
 // API endpoint to get connection status
-app.get('/status', (req, res) => {
+router.get('/status', (req, res) => {
     res.json({
         success: true,
         ...connectionStatus
@@ -268,7 +272,7 @@ app.get('/status', (req, res) => {
 });
 
 // API endpoint to log out
-app.post('/logout', async (req, res) => {
+router.post('/logout', async (req, res) => {
     if (sock) {
         await sock.logout();
         res.json({ success: true, message: 'Logout initiated successfully.' });
@@ -287,6 +291,9 @@ io.on('connection', (socket) => {
         console.log('User disconnected from the frontend.');
     });
 });
+
+// Mount the router to the /wapp path
+app.use('/wapp', router);
 
 server.listen(port, () => {
     console.log(`Server is running on http://localhost:${port}`);
