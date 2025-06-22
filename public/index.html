@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Sender</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 100%; max-width: 400px; }
+        h1 { text-align: center; color: #1c1e21; margin-top: 0; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; color: #606770; font-weight: 600; }
+        input, textarea { width: 100%; padding: 10px; border: 1px solid #dddfe2; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
+        textarea { resize: vertical; min-height: 80px; }
+        button { width: 100%; padding: 12px; background-color: #25D366; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        button:hover { background-color: #128C7E; }
+        #status { margin-top: 20px; text-align: center; font-weight: bold; min-height: 20px; }
+        .success { color: #25D366; }
+        .error { color: #fa3e3e; }
+        #connection-status { text-align: center; margin-bottom: 20px; padding: 10px; border-radius: 6px; font-weight: 500; }
+        .connected { background-color: #e7f3ff; color: #1877f2; }
+        .disconnected { background-color: #fff0f0; color: #fa3e3e; }
+        .connecting { background-color: #f0f2f5; color: #606770; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="connection-status" class="connecting">Checking connection...</div>
+        <h1>Send WhatsApp Message</h1>
+        <form id="message-form">
+            <div class="form-group">
+                <label for="number">Phone Number (with country code)</label>
+                <input type="tel" id="number" placeholder="e.g., 14155552671" required>
+            </div>
+            <div class="form-group">
+                <label for="message">Message</label>
+                <textarea id="message" placeholder="Type your message here..." required></textarea>
+            </div>
+            <button type="submit">Send Message</button>
+        </form>
+        <div id="status"></div>
+    </div>
+
+    <script>
+        const form = document.getElementById('message-form');
+        const statusDiv = document.getElementById('status');
+        const connectionStatusDiv = document.getElementById('connection-status');
+
+        async function checkConnectionStatus() {
+            try {
+                const response = await fetch('/status');
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    const displayName = result.user.name || 'No Name';
+                    connectionStatusDiv.textContent = `Connected as: ${displayName} (${result.user.number})`;
+                    connectionStatusDiv.className = 'connected';
+                } else {
+                    connectionStatusDiv.textContent = result.message || 'Not Connected';
+                    connectionStatusDiv.className = 'disconnected';
+                }
+            } catch (error) {
+                connectionStatusDiv.textContent = 'Server is unreachable.';
+                connectionStatusDiv.className = 'disconnected';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', checkConnectionStatus);
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const number = document.getElementById('number').value;
+            const message = document.getElementById('message').value;
+
+            statusDiv.textContent = 'Sending...';
+            statusDiv.className = '';
+
+            const response = await fetch('/send-message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ number, message })
+            });
+
+            const result = await response.json();
+            statusDiv.textContent = result.message;
+            statusDiv.className = result.success ? 'success' : 'error';
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "wapp",
+  "version": "1.0.0",
+  "description": "A simple WhatsApp message sender using Baileys, Node.js, and Docker.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.2",
+    "express": "^4.19.2",
+    "pino": "^8.19.0",
+    "pino-pretty": "^11.0.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
