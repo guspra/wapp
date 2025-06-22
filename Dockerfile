@@ -1,5 +1,5 @@
-# Use an official Node.js 18 runtime as a parent image
-FROM node:18-alpine
+# Use an official Node.js 20 runtime as a parent image
+FROM node:20-alpine
 
 # Baileys and its dependencies for media require some extra packages
 # See: https://github.com/WhiskeySockets/Baileys#requirements

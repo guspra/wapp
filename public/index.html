@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script src="/socket.io/socket.io.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WhatsApp Sender</title>
@@ -21,51 +22,91 @@
         .connected { background-color: #e7f3ff; color: #1877f2; }
         .disconnected { background-color: #fff0f0; color: #fa3e3e; }
         .connecting { background-color: #f0f2f5; color: #606770; }
+        #qr-container { display: none; text-align: center; padding: 20px 0; }
+        #qr-image { border: 1px solid #ddd; border-radius: 8px; }
+        #logout-button { background-color: #fa3e3e; margin-top: 10px; }
+        #logout-button:hover { background-color: #c82333; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div id="connection-status" class="connecting">Checking connection...</div>
-        <h1>Send WhatsApp Message</h1>
-        <form id="message-form">
-            <div class="form-group">
-                <label for="number">Phone Number (with country code)</label>
-                <input type="tel" id="number" placeholder="e.g., 14155552671" required>
-            </div>
-            <div class="form-group">
-                <label for="message">Message</label>
-                <textarea id="message" placeholder="Type your message here..." required></textarea>
-            </div>
-            <button type="submit">Send Message</button>
-        </form>
-        <div id="status"></div>
+        <div id="connection-status" class="connecting">Connecting to server...</div>
+
+        <div id="qr-container">
+            <h2>Scan to Link Device</h2>
+            <img id="qr-image" src="" alt="QR Code">
+        </div>
+
+        <div id="main-content" style="display: none;">
+            <h1>Send WhatsApp Message</h1>
+            <form id="message-form">
+                <div class="form-group">
+                    <label for="number">Phone Number (with country code)</label>
+                    <input type="tel" id="number" placeholder="e.g., 14155552671" required>
+                </div>
+                <div class="form-group">
+                    <label for="message">Message</label>
+                    <textarea id="message" placeholder="Type your message here..." required></textarea>
+                </div>
+                <button type="submit">Send Message</button>
+            </form>
+            <div id="status"></div>
+            <button id="logout-button">Logout</button>
+        </div>
     </div>
 
     <script>
         const form = document.getElementById('message-form');
         const statusDiv = document.getElementById('status');
         const connectionStatusDiv = document.getElementById('connection-status');
+        const qrContainer = document.getElementById('qr-container');
+        const qrImage = document.getElementById('qr-image');
+        const mainContent = document.getElementById('main-content');
+        const logoutButton = document.getElementById('logout-button');
 
-        async function checkConnectionStatus() {
-            try {
-                const response = await fetch('/status');
-                const result = await response.json();
+        const socket = io();
 
-                if (response.ok && result.success) {
-                    const displayName = result.user.name || 'No Name';
-                    connectionStatusDiv.textContent = `Connected as: ${displayName} (${result.user.number})`;
-                    connectionStatusDiv.className = 'connected';
-                } else {
-                    connectionStatusDiv.textContent = result.message || 'Not Connected';
-                    connectionStatusDiv.className = 'disconnected';
-                }
-            } catch (error) {
-                connectionStatusDiv.textContent = 'Server is unreachable.';
-                connectionStatusDiv.className = 'disconnected';
+        function updateUI(status) {
+            console.log('Updating UI with status:', status);
+            connectionStatusDiv.textContent = status.message;
+
+            if (status.connected) {
+                connectionStatusDiv.className = 'connected';
+                const displayName = status.user.name || 'No Name';
+                connectionStatusDiv.textContent = `Connected as: ${displayName} (${status.user.number})`;
+                mainContent.style.display = 'block';
+                qrContainer.style.display = 'none';
+
+                // Reset form state for a clean slate on new login
+                form.reset();
+                statusDiv.textContent = '';
+                statusDiv.className = '';
+            } else if (status.qr) {
+                connectionStatusDiv.className = 'connecting'; // Use a neutral style for the QR state
+                mainContent.style.display = 'none';
+                qrContainer.style.display = 'block';
+                qrImage.src = status.qr; // Directly assign the data URL from the server
+            } else {
+                const msg = status.message.toLowerCase();
+                connectionStatusDiv.className = msg.includes('connecting') || msg.includes('restarting') || msg.includes('initializing') || msg.includes('cleaning') ? 'connecting' : 'disconnected';
+                mainContent.style.display = 'none';
+                qrContainer.style.display = 'none';
             }
         }
 
-        document.addEventListener('DOMContentLoaded', checkConnectionStatus);
+        socket.on('status', updateUI);
+
+        // Handle logout button click
+        logoutButton.addEventListener('click', async () => {
+            // Immediately update the UI for a responsive feel
+            connectionStatusDiv.textContent = 'Logging out...';
+            connectionStatusDiv.className = 'connecting';
+            mainContent.style.display = 'none';
+            await fetch('/logout', { method: 'POST' });
+            // Server events will take over from here to display a new QR code.
+        });
+
+        // Handle form submission
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
