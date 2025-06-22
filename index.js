@@ -24,10 +24,10 @@ const io = new Server(server, {
 const port = process.env.PORT || 3000;
 
 // Middleware
-router.use(express.json());
-router.use(express.urlencoded({ extended: true }));
 // Serve static files from the root of the /wapp path
 router.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json()); // Apply to main app for new API endpoint
+app.use(express.urlencoded({ extended: true })); // Apply to main app
 
 // Centralized application state
 let sock;
@@ -39,6 +39,20 @@ let connectionStatus = {
 };
 const activeScheduledJobs = new Map(); // Map<jobId, { number: string, message: string, scheduledTime: Date, timezone: string, jobInstance: Job }>
 let isConnecting = false;
+
+// Reusable function to send a WhatsApp message
+async function sendMessage(number, message) {
+    if (!sock || !connectionStatus.connected) {
+        throw new Error('Client not connected.');
+    }
+    const jid = number.includes('@s.whatsapp.net') ? number : `${number}@s.whatsapp.net`;
+    const [result] = await sock.onWhatsApp(jid);
+    if (!result?.exists) {
+        throw new Error(`Number ${number} is not on WhatsApp.`);
+    }
+    await sock.sendMessage(jid, { text: message });
+}
+
 
 // Function to broadcast the current status to all clients
 function broadcastStatus() {
@@ -160,26 +174,13 @@ function broadcastScheduledJobs() {
     console.log('Broadcasting scheduled jobs update:', jobsData.length, 'jobs');
 }
 
-// API endpoint to send a message or schedule it
+// API endpoint to send a message or schedule it (for the web UI)
 router.post('/send-message', async (req, res) => {
     const { number, message, schedule: scheduleOptions } = req.body;
 
     if (!number || !message) {
         return res.status(400).json({ success: false, message: 'Number and message are required.' });
     }
-
-    // Reusable function to send a message
-    const sendMessage = async () => {
-        if (!sock || !connectionStatus.connected) {
-            throw new Error('Client not connected.');
-        }
-        const jid = number.includes('@s.whatsapp.net') ? number : `${number}@s.whatsapp.net`;
-        const [result] = await sock.onWhatsApp(jid);
-        if (!result?.exists) {
-            throw new Error(`Number ${number} is not on WhatsApp.`);
-        }
-        await sock.sendMessage(jid, { text: message });
-    };
 
     if (scheduleOptions) {
         const { date, time, timezone } = scheduleOptions;
@@ -236,6 +237,31 @@ router.post('/send-message', async (req, res) => {
         }
     }
 });
+
+// NEW: Simple API endpoint to send a chat message (for external use)
+app.post('/wapp/api/sendchat', async (req, res) => {
+    const { number, text } = req.body;
+
+    if (!number || !text) {
+        return res.status(400).json({ success: false, message: 'Recipient number and text are required.' });
+    }
+
+    try {
+        await sendMessage(number, text);
+        res.json({ success: true, message: 'Message sent successfully.' });
+    } catch (error) {
+        console.error('API Error sending message:', error.message);
+        if (error.message.includes('not connected')) {
+            return res.status(503).json({ success: false, message: error.message, hint: 'WhatsApp client is not connected. Scan QR code.' });
+        }
+        if (error.message.includes('not on WhatsApp')) {
+            return res.status(404).json({ success: false, message: error.message });
+        }
+        res.status(500).json({ success: false, message: error.message || 'Failed to send message.' });
+    }
+});
+
+
 
 // API endpoint to get all scheduled messages
 router.get('/scheduled-messages', (req, res) => {
