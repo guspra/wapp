@@ -157,6 +157,31 @@ async function connectToWhatsApp() {
         }
     });
 
+    // NEW FEATURE: Listen for "scrapcmax" and reply
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+        for (const m of messages) {
+            if (m.key.fromMe || !m.message) continue; // Ignore outgoing messages or messages without content
+
+            const incomingText = m.message.conversation || m.message.extendedTextMessage?.text;
+
+            if (incomingText && incomingText.toLowerCase() === 'scrapcmax') {
+                console.log(`Received "scrapcmax" from ${m.key.remoteJid}. Triggering scraper API...`);
+                try {
+                    // Using GET request to the host machine's scraper API
+                    // 'host.docker.internal' is a special DNS name that resolves to the host machine's IP from within a Docker container.
+                    const response = await fetch('http://host.docker.internal:3001/scraper/api', { method: 'GET' });
+                    if (response.ok) {
+                        console.log(`Scraper API triggered successfully. Status: ${response.status}, Response: ${await response.text()}`);
+                    } else {
+                        console.error(`Failed to trigger scraper API. Status: ${response.status}, Message: ${await response.text()}`);
+                    }
+                } catch (error) {
+                    console.error('Error calling scraper API:', error.message);
+                }
+            }
+        }
+    });
+
     return sock;
 }
 
@@ -197,7 +222,7 @@ router.post('/send-message', async (req, res) => {
             // Schedule the job
             const job = schedule.scheduleJob(jobId, scheduledDate, () => {
                 console.log(`Executing scheduled job for ${number}`);
-                sendMessage().catch(err => {
+                sendMessage(number, message).catch(err => {
                     console.error(`Failed to send scheduled message to ${number}:`, err.message);
                 }).finally(() => {
                     // Remove job from active list after execution
@@ -229,7 +254,7 @@ router.post('/send-message', async (req, res) => {
     } else {
         // Send immediately
         try {
-            await sendMessage();
+            await sendMessage(number, message);
             res.json({ success: true, message: 'Message sent successfully.' });
         } catch (error) {
             console.error('Error sending message:', error.message);
